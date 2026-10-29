@@ -100,6 +100,10 @@ _OUTCOME = {
 # log is body text.
 _LOG_TITLE = 200
 _LOG_DETAIL = 120
+# A call's detail, where its session publishes its input and output: a preview
+# of them, folded onto the call's one line. Longer than a result line, but the
+# whole log is one message, so each call's share decides how many calls fit.
+_LOG_TOOL_DETAIL = 300
 
 _LOG_UNTITLED = "(untitled)"
 _LOG_EMPTY = "No activity."
@@ -402,7 +406,8 @@ def _log_line(item: Item, *, escape: Callable[[str], str]) -> str:
     title = _fit(item.title, _LOG_TITLE, escape=escape) if item.title else _LOG_UNTITLED
     line = f"{_TOOL_MARKER} {_OUTCOME[item.status]} {title}"
     if item.text:
-        line += f" — {_fit(item.text, _LOG_DETAIL, escape=escape)}"
+        detail = " ".join(item.text.split())
+        line += f" — {_fit(detail, _LOG_TOOL_DETAIL, escape=escape)}"
     return line
 
 
