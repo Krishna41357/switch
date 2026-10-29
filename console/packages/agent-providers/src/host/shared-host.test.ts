@@ -16,7 +16,7 @@ import { abandonWaits, announcing, changed, until } from '../testing/until';
 import { Redactions } from './redaction';
 import { ServiceNotices } from './service-notices';
 import { connectParent, type ParentChannel } from './session-channel';
-import { parkAfterMs, RESET_HOLD_MS, runSharedHost, sessionBusy } from './shared-host';
+import { parkAfterMs, RESET_HOLD_MS, runSharedHost, sessionBusy, toolDetail } from './shared-host';
 import { hostParked } from './shared-state';
 
 // Every step here writes the session journal and flushes it to disk, and
@@ -850,6 +850,18 @@ it('parks after a day idle unless the environment says otherwise', () => {
   expect(parkAfterMs()).toBe(5000);
   vi.stubEnv('SWITCH_SESSION_PARK_AFTER_MS', 'off');
   expect(parkAfterMs()).toBeNull();
+  vi.unstubAllEnvs();
+});
+
+it('shows tool detail only when the environment turns it on', () => {
+  vi.stubEnv('SWITCH_SESSION_TOOL_DETAIL', '');
+  expect(toolDetail()).toBe(false);
+  vi.stubEnv('SWITCH_SESSION_TOOL_DETAIL', 'off');
+  expect(toolDetail()).toBe(false);
+  vi.stubEnv('SWITCH_SESSION_TOOL_DETAIL', 'on');
+  expect(toolDetail()).toBe(true);
+  vi.stubEnv('SWITCH_SESSION_TOOL_DETAIL', 'yes');
+  expect(() => toolDetail()).toThrow('SWITCH_SESSION_TOOL_DETAIL');
   vi.unstubAllEnvs();
 });
 

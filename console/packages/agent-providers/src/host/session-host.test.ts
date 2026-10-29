@@ -7,6 +7,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { ProviderConversationUnavailableError, type ProviderAdapter } from '../adapter';
 import type { ProviderRuntimeEvent } from '../events';
 import { abandonWaits, announcing, changed, until } from '../testing/until';
+import { Redactions } from './redaction';
 import { CONNECTOR_APPROVAL_NOTICE, ServiceNotices } from './service-notices';
 import { HostedSession, type RoomReply, unpostedReply } from './session-host';
 
@@ -1653,4 +1654,58 @@ it("tells its owner when the provider asks to run a connector's tool, and only t
         : []
   );
   expect(order).toEqual(['bash', 'notice', 'search', 'add_comment']);
+});
+
+async function runTool(toolDetail: boolean | undefined) {
+  const root = await mkdtemp(join(tmpdir(), 'sdk-host-test-'));
+  roots.push(root);
+  const fixture = setup('codex');
+  const host = await startHost(
+    root,
+    {
+      ...fixture.config,
+      redactions: new Redactions(),
+      ...(toolDetail === undefined ? {} : { toolDetail }),
+    },
+    fixture.adapter
+  );
+  hosts.push(host);
+  await until(() => expect(host.snapshot().session.status).toBe('ready'));
+  await host.command(message('turn'));
+  await until(() => expect(host.snapshot().turns[0]?.status).toBe('running'));
+  // Built at runtime so no key-shaped literal appears in source.
+  const password = 'hunter2' + 'secret';
+  fixture.emit({
+    type: 'item.completed',
+    turnId: 'turn',
+    item: {
+      id: 't1',
+      type: 'command_execution',
+      status: 'completed',
+      title: 'psql',
+      payload: { command: 'psql', env: { DB_PASSWORD: password } },
+      text: `connected to postgres://app:${password}@db/main`,
+    },
+  });
+  fixture.emit({ type: 'turn.completed', turnId: 'turn', outcome: 'completed', usage: [] });
+  await until(() => expect(host.snapshot().turns[0]?.status).toBe('completed'));
+  await host.barrier();
+  const tool = host.snapshot().items.find((item) => item.kind === 'tool-activity');
+  return { tool, journal: await readFile(join(root, 'events.jsonl'), 'utf8'), password };
+}
+
+it('publishes a tool call by its title only unless tool detail is on', async () => {
+  const { tool, journal, password } = await runTool(undefined);
+  expect(tool).toMatchObject({ title: 'psql', text: '' });
+  expect(journal).not.toContain(password);
+  expect(journal).not.toContain('connected to');
+});
+
+it('publishes the input and output of a tool call, redacted, when tool detail is on', async () => {
+  const { tool, journal, password } = await runTool(true);
+  expect(tool?.text).toBe(
+    'Input: {"command":"psql","env":{"DB_PASSWORD":"[REDACTED]"}}\n\n' +
+      'Output:\nconnected to postgres://app:[REDACTED]@db/main'
+  );
+  expect(journal).not.toContain(password);
 });

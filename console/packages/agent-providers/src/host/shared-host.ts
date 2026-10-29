@@ -105,6 +105,11 @@ export type SharedHostOptions = {
   instructions: string | null;
   /** The service tokens this session has been handed, scrubbed from every event it records. */
   redactions: Redactions;
+  /**
+   * Whether tool items carry the call's input and output, redacted and capped
+   * (`toolDetail()`). Off when absent.
+   */
+  toolDetail?: boolean;
   /** Its services falling back to the machine's own sign-in, shown in the session once it is up. */
   serviceNotices: ServiceNotices;
 };
@@ -128,6 +133,18 @@ export function parkAfterMs(): number | null {
       `SWITCH_SESSION_PARK_AFTER_MS must be a positive number of milliseconds or "off", not "${value}".`
     );
   return parsed;
+}
+
+/**
+ * Whether this process's sessions show a tool call's input and output in
+ * chat: `SWITCH_SESSION_TOOL_DETAIL` set to `on`. Off when unset or `off`,
+ * since raw tool output otherwise stays on the execution host.
+ */
+export function toolDetail(): boolean {
+  const value = process.env.SWITCH_SESSION_TOOL_DETAIL;
+  if (value === undefined || value === '' || value === 'off') return false;
+  if (value === 'on') return true;
+  throw new Error(`SWITCH_SESSION_TOOL_DETAIL must be "on" or "off", not "${value}".`);
 }
 
 /**
@@ -392,6 +409,7 @@ export async function runSharedHost(
         resumeOperationId: options.resumeOperationId,
         authenticate: options.authenticate,
         redactions: options.redactions,
+        toolDetail: options.toolDetail,
         connectorApproval: () => options.serviceNotices.raise(CONNECTOR_APPROVAL_NOTICE),
         stageAttachments: (attachments) =>
           Promise.all(
@@ -1137,6 +1155,7 @@ export async function hostSessionProcess(input: {
         parkAfterMs: parkAfterMs(),
         instructions: config.execution?.instructions ?? null,
         redactions,
+        toolDetail: toolDetail(),
         serviceNotices,
       },
       input.adapter,
