@@ -16,7 +16,8 @@ import { abandonWaits, announcing, changed, until } from '../testing/until';
 import { Redactions } from './redaction';
 import { ServiceNotices } from './service-notices';
 import { connectParent, type ParentChannel } from './session-channel';
-import { parkAfterMs, RESET_HOLD_MS, runSharedHost, sessionBusy, toolDetail } from './shared-host';
+import { parkAfterMs, RESET_HOLD_MS, runSharedHost, sessionBusy } from './shared-host';
+import { toolDetail } from './shared-host';
 import { hostParked } from './shared-state';
 
 // Every step here writes the session journal and flushes it to disk, and

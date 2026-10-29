@@ -6,7 +6,8 @@ import { describe, expect, it } from 'vitest';
 import type { ProviderRuntimeEvent } from '../events';
 import { Redactions } from '../host/redaction';
 import { ToolDetailBuffer } from '../host/tool-detail-buffer';
-import { ChatProjector, TOOL_DETAIL_LIMIT, TOOL_DETAIL_WITHHELD } from './chat-projector';
+import { ChatProjector } from './chat-projector';
+import { TOOL_DETAIL_LIMIT, TOOL_DETAIL_WITHHELD } from './chat-projector';
 import { EventOutbox } from './event-outbox';
 
 const session = (provider: Session['provider']): Session => ({
@@ -44,7 +45,7 @@ describe('chat projection', () => {
   it.each(['claude', 'codex', 'opencode', 'antigravity', 'cursor'] as const)(
     'projects %s text with bounded full replacements and immediate final state',
     (provider) => {
-      const projector = new ChatProjector(session(provider), null, null);
+      const projector = new ChatProjector(session(provider), null);
       projector.bindTurn('turn', context);
       const base = {
         provider,
@@ -102,7 +103,7 @@ describe('chat projection', () => {
     }
   );
   it('excludes reasoning and tool payload/output while preserving verified user origin', () => {
-    const projector = new ChatProjector(session('claude'), null, null);
+    const projector = new ChatProjector(session('claude'), null);
     projector.bindTurn('turn', context);
     const base = {
       provider: 'claude',
@@ -186,7 +187,7 @@ it('persists host sequences and acknowledgements across reloads', async () => {
 });
 
 it('preserves a long Unicode response in bounded wire items', () => {
-  const projector = new ChatProjector(session('claude'), null, null);
+  const projector = new ChatProjector(session('claude'), null);
   projector.bindTurn('turn', context);
   const text = '😀\n"'.repeat(20000);
   const events = projector.ingest(
@@ -223,7 +224,7 @@ describe('service tokens in streamed text', () => {
   function projector() {
     const redactions = new Redactions();
     redactions.add(TOKEN);
-    const projected = new ChatProjector(session('claude'), redactions, null);
+    const projected = new ChatProjector(session('claude'), redactions);
     projected.bindTurn('turn', context);
     return projected;
   }

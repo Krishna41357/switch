@@ -37,7 +37,7 @@ export class ChatProjector {
   constructor(
     private readonly session: Session,
     private readonly redactions: Redactions | null,
-    private readonly toolDetails: ToolDetailBuffer | null
+    private readonly toolDetails: ToolDetailBuffer | null = null
   ) {}
 
   bindTurn(turnId: string, context: TurnContext): void {
