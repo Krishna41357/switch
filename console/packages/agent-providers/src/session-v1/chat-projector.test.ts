@@ -5,7 +5,8 @@ import type { Session } from '@switch-console/shared/session-v1';
 import { describe, expect, it } from 'vitest';
 import type { ProviderRuntimeEvent } from '../events';
 import { Redactions } from '../host/redaction';
-import { ChatProjector } from './chat-projector';
+import { ToolDetailBuffer } from '../host/tool-detail-buffer';
+import { ChatProjector, TOOL_DETAIL_LIMIT, TOOL_DETAIL_WITHHELD } from './chat-projector';
 import { EventOutbox } from './event-outbox';
 
 const session = (provider: Session['provider']): Session => ({
@@ -43,7 +44,7 @@ describe('chat projection', () => {
   it.each(['claude', 'codex', 'opencode', 'antigravity', 'cursor'] as const)(
     'projects %s text with bounded full replacements and immediate final state',
     (provider) => {
-      const projector = new ChatProjector(session(provider), null);
+      const projector = new ChatProjector(session(provider), null, null);
       projector.bindTurn('turn', context);
       const base = {
         provider,
@@ -101,7 +102,7 @@ describe('chat projection', () => {
     }
   );
   it('excludes reasoning and tool payload/output while preserving verified user origin', () => {
-    const projector = new ChatProjector(session('claude'), null);
+    const projector = new ChatProjector(session('claude'), null, null);
     projector.bindTurn('turn', context);
     const base = {
       provider: 'claude',
@@ -185,7 +186,7 @@ it('persists host sequences and acknowledgements across reloads', async () => {
 });
 
 it('preserves a long Unicode response in bounded wire items', () => {
-  const projector = new ChatProjector(session('claude'), null);
+  const projector = new ChatProjector(session('claude'), null, null);
   projector.bindTurn('turn', context);
   const text = '😀\n"'.repeat(20000);
   const events = projector.ingest(
@@ -222,7 +223,7 @@ describe('service tokens in streamed text', () => {
   function projector() {
     const redactions = new Redactions();
     redactions.add(TOKEN);
-    const projected = new ChatProjector(session('claude'), redactions);
+    const projected = new ChatProjector(session('claude'), redactions, null);
     projected.bindTurn('turn', context);
     return projected;
   }
@@ -279,5 +280,132 @@ describe('service tokens in streamed text', () => {
     );
     expect(parts.join('')).toBe(`${'a'.repeat(4096 - 10)}[REDACTED] done`);
     for (const part of parts) expect(part).not.toContain(TOKEN.slice(-8));
+  });
+});
+
+describe('tool detail', () => {
+  // Built at runtime so no key-shaped literal appears in source.
+  const TOKEN = 'synthetic-installation-token-0123456789';
+  const PASSWORD = 'hunter2' + 'secret';
+  const base = {
+    provider: 'codex' as const,
+    sessionId: 'session',
+    eventId: 'native-event',
+    createdAt: '2026-09-07T12:00:00Z',
+    turnId: 'turn',
+  };
+  const texts = (bodies: ReturnType<ChatProjector['ingest']>) =>
+    bodies.flatMap((body) => (body.type === 'item.upsert' ? [body.item.text] : []));
+  const tool = (
+    status: 'in_progress' | 'completed',
+    text: string,
+    payload: Record<string, unknown> = { command: 'ls' }
+  ) => ({
+    ...base,
+    type: status === 'completed' ? ('item.completed' as const) : ('item.started' as const),
+    item: { id: 'tool', type: 'command_execution' as const, status, title: 'ls', text, payload },
+  });
+
+  /** Feeds the buffer before the projector, as the session host does. */
+  function setup(redactions: Redactions | null = new Redactions()) {
+    redactions?.add(TOKEN);
+    const buffer = new ToolDetailBuffer();
+    const projector = new ChatProjector(session('codex'), redactions, buffer);
+    projector.bindTurn('turn', context);
+    return (event: ProviderRuntimeEvent, now: number) => {
+      buffer.ingest(event, 'epoch');
+      return projector.ingest(event, now);
+    };
+  }
+
+  it('is not published when off, whatever the call output', () => {
+    const projector = new ChatProjector(session('codex'), new Redactions(), null);
+    projector.bindTurn('turn', context);
+    expect(texts(projector.ingest(tool('in_progress', 'out'), 0))).toEqual(['']);
+    expect(
+      projector.ingest({ ...base, type: 'item.delta', itemId: 'tool', delta: 'more' }, 1000)
+    ).toEqual([]);
+    expect(texts(projector.ingest(tool('completed', 'raw output'), 2000))).toEqual(['']);
+  });
+
+  it('publishes the input and output of a call when on', () => {
+    const feed = setup();
+    expect(texts(feed(tool('completed', 'file1\nfile2'), 0))).toEqual([
+      'Input: {"command":"ls"}\n\nOutput:\nfile1\nfile2',
+    ]);
+  });
+
+  it('masks secrets in the input and output, by value and by shape', () => {
+    const feed = setup();
+    const [text] = texts(
+      feed(
+        tool('completed', `connecting to postgres://app:${PASSWORD}@db/main as ${TOKEN}`, {
+          command: 'psql',
+          env: { db_password: PASSWORD },
+        }),
+        0
+      )
+    );
+    expect(text).toBe(
+      'Input: {"command":"psql","env":{"db_password":"[REDACTED]"}}\n\n' +
+        'Output:\nconnecting to postgres://app:[REDACTED]@db/main as [REDACTED]'
+    );
+  });
+
+  it('cuts a large output to one part, with a note of what was left out', () => {
+    const feed = setup();
+    const bodies = feed(tool('completed', 'x'.repeat(10_000)), 0);
+    expect(bodies).toHaveLength(1);
+    const [text] = texts(bodies);
+    expect(Array.from(text).length).toBeLessThanOrEqual(TOOL_DETAIL_LIMIT);
+    const full = `Input: {"command":"ls"}\n\nOutput:\n${'x'.repeat(6 * 1024)}\n…\n${'x'.repeat(2 * 1024)}`;
+    const shown = text.slice(0, text.lastIndexOf('\n[truncated'));
+    expect(full.startsWith(shown)).toBe(true);
+    expect(text.endsWith(`\n[truncated, ${full.length - shown.length} more characters]`)).toBe(
+      true
+    );
+  });
+
+  it('masks a secret the cut goes through before cutting', () => {
+    const feed = setup();
+    const prefix = 'Input: {"command":"ls"}\n\nOutput:\n';
+    const key = 'sk-' + 'Abcdefghijk' + 'lmnopqrstuvwxyz01234';
+    const lead = 'a'.repeat(TOOL_DETAIL_LIMIT - 48 - prefix.length - 6);
+    const [text] = texts(feed(tool('completed', `${lead}${key} ${TOKEN} ${'b'.repeat(500)}`), 0));
+    expect(text).toContain('[truncated,');
+    expect(text).not.toContain(key.slice(0, 8));
+    expect(text).not.toContain(TOKEN.slice(0, 8));
+  });
+
+  it('streams output deltas, throttled, without showing part of a token', () => {
+    const feed = setup();
+    const published = texts(feed(tool('in_progress', ''), 0));
+    const chunks = ['token ', TOKEN.slice(0, 12), TOKEN.slice(12, 25), TOKEN.slice(25), ' ok'];
+    chunks.forEach((delta, index) =>
+      published.push(
+        ...texts(feed({ ...base, type: 'item.delta', itemId: 'tool', delta }, (index + 1) * 300))
+      )
+    );
+    expect(texts(feed({ ...base, type: 'item.delta', itemId: 'tool', delta: '!' }, 1510))).toEqual(
+      []
+    );
+    published.push(...texts(feed(tool('completed', ''), 2000)));
+    expect(published.at(-1)).toBe('Input: {"command":"ls"}\n\nOutput:\ntoken [REDACTED] ok!');
+    for (const text of published) expect(text).not.toContain(TOKEN.slice(0, 8));
+  });
+
+  it('publishes nothing without redactions to apply', () => {
+    const feed = setup(null);
+    expect(texts(feed(tool('completed', 'out'), 0))).toEqual(['']);
+  });
+
+  it('withholds the detail when redaction fails', () => {
+    class Failing extends Redactions {
+      override value<T>(_input: T): T {
+        throw new Error('simulated redaction failure');
+      }
+    }
+    const feed = setup(new Failing());
+    expect(texts(feed(tool('completed', 'out'), 0))).toEqual([TOOL_DETAIL_WITHHELD]);
   });
 });

@@ -1,9 +1,22 @@
 import type { HostBody, Item, Origin, Session } from '@switch-console/shared/session-v1';
 import type { ProviderRuntimeEvent } from '../events';
 import type { Redactions } from '../host/redaction';
+import type { ToolDetailBuffer } from '../host/tool-detail-buffer';
 
 type TurnContext = { commandId: string | null; origin: Origin | null };
-type BufferedItem = { item: Item; emittedAt: number; dirty: boolean; parts: number };
+type BufferedItem = {
+  item: Item;
+  emittedAt: number;
+  dirty: boolean;
+  parts: number;
+  nativeId: string;
+};
+
+/** A tool item's published detail, in characters: inside one 4096-character part, note included. */
+export const TOOL_DETAIL_LIMIT = 4000;
+/** Room kept for the truncation note, which is under 40 characters. */
+const TOOL_DETAIL_NOTE = 48;
+export const TOOL_DETAIL_WITHHELD = '[tool detail withheld: it could not be redacted]';
 
 /** Projects chat and tool summaries only. The host owns sequencing and durable publication. */
 export class ChatProjector {
@@ -16,10 +29,15 @@ export class ChatProjector {
    * from an assistant message's whole text before it is split into parts,
    * and text still streaming in holds back what could be the start of one,
    * so no published revision or part carries a token in pieces.
+   *
+   * `toolDetails`, when given, is where a tool item's text comes from: what
+   * the call was given and gave back, redacted and capped. When null a tool
+   * item carries its title only.
    */
   constructor(
     private readonly session: Session,
-    private readonly redactions: Redactions | null
+    private readonly redactions: Redactions | null,
+    private readonly toolDetails: ToolDetailBuffer | null
   ) {}
 
   bindTurn(turnId: string, context: TurnContext): void {
@@ -92,6 +110,7 @@ export class ChatProjector {
           emittedAt: previous?.emittedAt ?? -Infinity,
           dirty: true,
           parts: previous?.parts ?? 1,
+          nativeId: event.item.id,
         };
         this.items.set(key, buffered);
         return this.emitItem(buffered, now, event.type === 'item.completed');
@@ -106,8 +125,14 @@ export class ChatProjector {
         buffered.dirty = true;
         return this.emitItem(buffered, now, false);
       }
-      case 'item.delta':
-        return []; // Tool output and reasoning stay on the execution host.
+      case 'item.delta': {
+        // Tool output and reasoning stay on the execution host, unless tool detail is on.
+        if (!this.toolDetails) return [];
+        const buffered = this.items.get(JSON.stringify([event.turnId, event.itemId]));
+        if (!buffered || buffered.item.kind !== 'tool-activity') return [];
+        buffered.dirty = true;
+        return this.emitItem(buffered, now, false);
+      }
       default:
         return [];
     }
@@ -123,6 +148,8 @@ export class ChatProjector {
     buffer.item.revision += 1;
     buffer.emittedAt = now;
     buffer.dirty = false;
+    if (this.toolDetails && buffer.item.kind === 'tool-activity')
+      buffer.item.text = this.toolText(this.toolDetails, buffer);
     const characters = Array.from(this.visible(buffer.item.text, final));
     const count = Math.max(1, Math.ceil(characters.length / 4096), buffer.parts);
     buffer.parts = count;
@@ -134,6 +161,35 @@ export class ChatProjector {
         text: characters.slice(index * 4096, (index + 1) * 4096).join(''),
       },
     }));
+  }
+
+  /**
+   * What a tool call was given and gave back, as the host's buffer holds it.
+   * Redacted whole before it is cut, so a secret the cut goes through is
+   * already masked: each input string first, so one clipped short is caught
+   * by its cut tail, then the input's JSON, so a value is caught by its key.
+   * Nothing without redactions, and a notice in place of the detail when
+   * redaction fails.
+   */
+  private toolText(toolDetails: ToolDetailBuffer, buffer: BufferedItem): string {
+    const detail = toolDetails.detail(this.session.epoch, buffer.item.turnId, buffer.nativeId);
+    if (!detail || !this.redactions) return '';
+    let text: string;
+    try {
+      const sections: string[] = [];
+      if (detail.input !== null)
+        sections.push(
+          `Input: ${this.redactions.text(JSON.stringify(this.redactions.value(detail.input)))}`
+        );
+      if (detail.output !== null) sections.push(`Output:\n${this.redactions.text(detail.output)}`);
+      text = sections.join('\n\n');
+    } catch {
+      return TOOL_DETAIL_WITHHELD;
+    }
+    const characters = Array.from(text);
+    if (characters.length <= TOOL_DETAIL_LIMIT) return text;
+    const kept = TOOL_DETAIL_LIMIT - TOOL_DETAIL_NOTE;
+    return `${characters.slice(0, kept).join('')}\n[truncated, ${characters.length - kept} more characters]`;
   }
 
   private visible(text: string, final: boolean): string {

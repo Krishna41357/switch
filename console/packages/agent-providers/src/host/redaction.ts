@@ -211,18 +211,6 @@ export class Redactions {
   }
 
   /**
-   * Redact `input` and return it, or return `fallback` if redaction throws.
-   * Fail-closed: callers that must not leak a secret on error use this.
-   */
-  safeText(input: string, fallback: string): string {
-    try {
-      return this.text(input);
-    } catch {
-      return fallback;
-    }
-  }
-
-  /**
    * `input` with its end redacted when that end is the start of a value held
    * here, before a closing ellipsis or not: what a title cut short through a
    * token leaves, which no exact match finds. Eight characters or more, so

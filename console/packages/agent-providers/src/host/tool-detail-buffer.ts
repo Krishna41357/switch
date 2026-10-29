@@ -243,6 +243,13 @@ export class ToolDetailBuffer {
     return picked.reverse();
   }
 
+  /** The call held for `itemId`, the provider's id, in `turnId`; null when none is held. */
+  detail(epoch: string, turnId: string, itemId: string): HostToolDetail | null {
+    if (this.epoch !== epoch) return null;
+    const entry = this.turns.get(turnId)?.get(itemId);
+    return entry ? detailOf(entry) : null;
+  }
+
   private turn(turnId: string): Map<string, ToolEntry> {
     let tools = this.turns.get(turnId);
     if (!tools) {

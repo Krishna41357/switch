@@ -155,3 +155,24 @@ it('keeps an answer bounded, newest turns first, listing what is left over bare'
   expect(turns.at(-1)!.tools[0]!.output).toBe(big);
   expect(turns.flatMap((turn) => turn.tools).some((tool) => tool.output === null)).toBe(true);
 });
+
+it('gives one call by its provider id, for the current epoch only', () => {
+  const buffer = new ToolDetailBuffer();
+  buffer.ingest(
+    itemEvent('item.completed', 'turn', {
+      id: 'tu1',
+      status: 'completed',
+      payload: { command: 'ls' },
+      text: 'out',
+    }),
+    'epoch'
+  );
+  expect(buffer.detail('epoch', 'turn', 'tu1')).toMatchObject({
+    input: { command: 'ls' },
+    output: 'out',
+    truncated: false,
+  });
+  expect(buffer.detail('epoch', 'turn', 'other')).toBeNull();
+  expect(buffer.detail('epoch', 'other', 'tu1')).toBeNull();
+  expect(buffer.detail('older', 'turn', 'tu1')).toBeNull();
+});

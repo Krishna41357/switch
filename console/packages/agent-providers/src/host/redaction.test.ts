@@ -479,25 +479,6 @@ describe('generic secret shapes: secret straddling a truncation boundary', () =>
   });
 });
 
-describe('generic secret shapes: safeText fail-closed helper', () => {
-  it('returns the redacted value normally', () => {
-    const r = new Redactions();
-    const key = 'sk-' + 'FakeTestKeyAbcdefghijklmno12345';
-    expect(r.safeText(`key: ${key}`, 'FALLBACK')).toBe('key: [REDACTED]');
-  });
-
-  it('returns the fallback when an internal error would otherwise propagate', () => {
-    // Use a subclass that overrides text() to throw, simulating a regex failure.
-    class BrokenRedactions extends Redactions {
-      override text(_input: string): string {
-        throw new Error('simulated redaction failure');
-      }
-    }
-    const br = new BrokenRedactions();
-    expect(br.safeText('anything', 'title only')).toBe('title only');
-  });
-});
-
 describe('generic secret shapes: names, blocks and inputs the first patterns missed', () => {
   // Built at runtime so no key-shaped literal appears in source.
   const value = 'abcd' + '1234efgh';

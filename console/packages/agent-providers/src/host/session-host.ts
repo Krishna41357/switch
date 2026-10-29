@@ -186,7 +186,7 @@ export class HostedSession {
       if (record.type === 'model') config.input.model = { id: record.id, options: record.options };
       if (record.type === 'room-reply') this.roomReplies.add(record.commandId);
     }
-    this.projector = new ChatProjector(config.session, config.redactions ?? null);
+    this.projector = new ChatProjector(config.session, config.redactions ?? null, null);
     this.unsubscribe = adapter.subscribe((event) => {
       if (event.sessionId !== config.session.sessionId) return;
       this.reasoningBuffer.ingest(event, this.config.session.epoch, Date.now());
