@@ -247,25 +247,25 @@ describe('generic secret shapes: Authorization / Bearer header values', () => {
     const r = new Redactions();
     // Build the value via concatenation so gitleaks does not flag the literal.
     const val = 'eyJ' + 'header' + '.' + 'eyJ' + 'payload' + '.' + 'sig12345';
-    expect(r.text(`Authorization: Bearer ${val}`)).toBe('Authorization: Bearer [REDACTED]');
+    expect(r.secrets(`Authorization: Bearer ${val}`)).toBe('Authorization: Bearer [REDACTED]');
   });
 
   it('redacts a Token value in an Authorization header (case-insensitive header)', () => {
     const r = new Redactions();
     const val = 'abcdef' + 'ghijklmn';
-    expect(r.text(`authorization: Token ${val}`)).toBe('authorization: Token [REDACTED]');
+    expect(r.secrets(`authorization: Token ${val}`)).toBe('authorization: Token [REDACTED]');
   });
 
   it('redacts a bare Bearer prefix in a log line', () => {
     const r = new Redactions();
     const val = 'tok' + 'ABCDEFGHIJK';
-    expect(r.text(`sending Bearer ${val} to api`)).toBe('sending Bearer [REDACTED] to api');
+    expect(r.secrets(`sending Bearer ${val} to api`)).toBe('sending Bearer [REDACTED] to api');
   });
 
   it('does not redact a short word after Bearer', () => {
     const r = new Redactions();
     // Value shorter than the 8-char minimum must not be masked.
-    expect(r.text('Bearer short')).toBe('Bearer short');
+    expect(r.secrets('Bearer short')).toBe('Bearer short');
   });
 });
 
@@ -274,31 +274,31 @@ describe('generic secret shapes: vendor API key prefixes', () => {
     const r = new Redactions();
     // Concatenate so the literal is never a full key-shaped string.
     const key = 'sk-' + 'Abcdefghijk' + 'lmnopqrstuvwxyz01234';
-    expect(r.text(`key=${key}`)).toBe('key=[REDACTED]');
+    expect(r.secrets(`key=${key}`)).toBe('key=[REDACTED]');
   });
 
   it('redacts an AWS access key id (AKIA prefix)', () => {
     const r = new Redactions();
     const key = 'AKIA' + 'IOSFODNN7EXAMPLE';
-    expect(r.text(`aws_access_key_id=${key}`)).toBe('aws_access_key_id=[REDACTED]');
+    expect(r.secrets(`aws_access_key_id=${key}`)).toBe('aws_access_key_id=[REDACTED]');
   });
 
   it('redacts a Slack bot token (xoxb- prefix)', () => {
     const r = new Redactions();
     const key = 'xoxb-' + '12345678' + '-' + 'ABCDEFGH';
-    expect(r.text(`token: ${key}`)).toBe('token: [REDACTED]');
+    expect(r.secrets(`token: ${key}`)).toBe('token: [REDACTED]');
   });
 
   it('redacts a Google API key (AIza prefix)', () => {
     const r = new Redactions();
     const key = 'AIza' + 'SyBV9hLqSGRd8LzjPSMp5A7n3QRk' + 'extra01234';
-    expect(r.text(`api_key=${key}`)).toBe('api_key=[REDACTED]');
+    expect(r.secrets(`api_key=${key}`)).toBe('api_key=[REDACTED]');
   });
 
   it('leaves ordinary words that happen to start with sk-', () => {
     const r = new Redactions();
     // "sk-" alone (no long suffix) must not be masked.
-    expect(r.text('ski-jump result: 42')).toBe('ski-jump result: 42');
+    expect(r.secrets('ski-jump result: 42')).toBe('ski-jump result: 42');
   });
 });
 
@@ -310,14 +310,14 @@ describe('generic secret shapes: JWT', () => {
     const payload = 'eyJ' + 'zdWIiOiJ1c2VyMSJ9';
     const sig = 'SflKxwRJSMeKKF2QT4fwpMeJf36P' + 'Ok6yJV_adQssw5c';
     const jwt = `${header}.${payload}.${sig}`;
-    expect(r.text(`token: ${jwt}`)).toBe('token: [REDACTED]');
+    expect(r.secrets(`token: ${jwt}`)).toBe('token: [REDACTED]');
   });
 
   it('leaves strings that look like two JWT segments but not three', () => {
     const r = new Redactions();
     const notJwt = 'eyJ' + 'aaa.' + 'eyJ' + 'bbb';
     // No third segment → not a JWT → not masked.
-    expect(r.text(notJwt)).toBe(notJwt);
+    expect(r.secrets(notJwt)).toBe(notJwt);
   });
 });
 
@@ -331,7 +331,7 @@ describe('generic secret shapes: PEM private-key block', () => {
       'AAAAAAA\n' +
       '-----END RSA ' +
       'PRIVATE KEY-----';
-    const out = r.text(`key data: ${pem} end`);
+    const out = r.secrets(`key data: ${pem} end`);
     expect(out).toBe('key data: [REDACTED] end');
     expect(out).not.toContain('MIIEow');
   });
@@ -344,13 +344,13 @@ describe('generic secret shapes: PEM private-key block', () => {
       'MHQCAQEEIBkg4MWKQ5xL1OyLgAAAAAA\n' +
       '-----END EC ' +
       'PRIVATE KEY-----';
-    expect(r.text(pem)).toBe('[REDACTED]');
+    expect(r.secrets(pem)).toBe('[REDACTED]');
   });
 
   it('leaves a public key block alone', () => {
     const r = new Redactions();
     const pub = '-----BEGIN PUBLIC KEY-----\nMIIB\n-----END PUBLIC KEY-----';
-    expect(r.text(pub)).toBe(pub);
+    expect(r.secrets(pub)).toBe(pub);
   });
 });
 
@@ -359,7 +359,7 @@ describe('generic secret shapes: URL credentials', () => {
     const r = new Redactions();
     const pw = 'hunter' + '2secret!';
     const url = `postgres://dbuser:${pw}@db.example.com:5432/mydb`;
-    const out = r.text(url);
+    const out = r.secrets(url);
     expect(out).toBe('postgres://dbuser:[REDACTED]@db.example.com:5432/mydb');
     expect(out).not.toContain(pw);
   });
@@ -369,14 +369,14 @@ describe('generic secret shapes: URL credentials', () => {
     // No @ in the password because the regex stops at @.
     const pw = 'Passw0rd' + '123secure';
     const url = `https://admin:${pw}@intranet.example.org/api`;
-    const out = r.text(url);
+    const out = r.secrets(url);
     expect(out).toBe('https://admin:[REDACTED]@intranet.example.org/api');
     expect(out).not.toContain(pw);
   });
 
   it('leaves a URL without embedded credentials alone', () => {
     const r = new Redactions();
-    expect(r.text('https://example.com/path?q=1')).toBe('https://example.com/path?q=1');
+    expect(r.secrets('https://example.com/path?q=1')).toBe('https://example.com/path?q=1');
   });
 });
 
@@ -384,7 +384,7 @@ describe('generic secret shapes: key=value assignments', () => {
   it('redacts password= in env-var form', () => {
     const r = new Redactions();
     const pw = 'Sup3rSecret' + 'Pass';
-    expect(r.text(`DATABASE_URL password=${pw} host=db`)).toBe(
+    expect(r.secrets(`DATABASE_URL password=${pw} host=db`)).toBe(
       'DATABASE_URL password=[REDACTED] host=db'
     );
   });
@@ -392,51 +392,53 @@ describe('generic secret shapes: key=value assignments', () => {
   it('redacts token= in CLI flag form', () => {
     const r = new Redactions();
     const tok = 'mytoken' + 'ABCDEFGH';
-    expect(r.text(`--token=${tok}`)).toBe('--token=[REDACTED]');
+    expect(r.secrets(`--token=${tok}`)).toBe('--token=[REDACTED]');
   });
 
   it('redacts api_key= (underscore)', () => {
     const r = new Redactions();
     const key = 'abcd' + 'efgh12345678';
-    expect(r.text(`api_key=${key}`)).toBe('api_key=[REDACTED]');
+    expect(r.secrets(`api_key=${key}`)).toBe('api_key=[REDACTED]');
   });
 
   it('redacts "secret":"value" JSON form', () => {
     const r = new Redactions();
     const val = 'mysecret' + 'value123';
-    expect(r.text(`{"secret":"${val}"}`)).toBe('{"secret":"[REDACTED]"}');
+    expect(r.secrets(`{"secret":"${val}"}`)).toBe('{"secret":"[REDACTED]"}');
   });
 
   it('does NOT redact "password policy" — keyword with no value', () => {
     const r = new Redactions();
     // "password" followed by a space and prose, not an = or :.
-    expect(r.text('password policy requires 12 chars')).toBe('password policy requires 12 chars');
+    expect(r.secrets('password policy requires 12 chars')).toBe(
+      'password policy requires 12 chars'
+    );
   });
 
   it('does NOT redact a short value after token=', () => {
     const r = new Redactions();
     // Values shorter than 4 characters are not secrets.
-    expect(r.text('token=abc')).toBe('token=abc');
+    expect(r.secrets('token=abc')).toBe('token=abc');
   });
 });
 
 describe('generic secret shapes: look-alike false-negatives', () => {
   it('leaves laughs_total and similar benign words untouched', () => {
     const r = new Redactions();
-    expect(r.text('laughs_total=5 highs_and_lows weighs_more')).toBe(
+    expect(r.secrets('laughs_total=5 highs_and_lows weighs_more')).toBe(
       'laughs_total=5 highs_and_lows weighs_more'
     );
   });
 
   it('leaves "password policy" and "secret management" prose untouched', () => {
     const r = new Redactions();
-    expect(r.text('Read the password policy and secret management docs')).toBe(
+    expect(r.secrets('Read the password policy and secret management docs')).toBe(
       'Read the password policy and secret management docs'
     );
   });
 });
 
-describe('generic secret shapes: nested JSON via value()', () => {
+describe('generic secret shapes: nested JSON arguments, serialized', () => {
   it('redacts a secret inside deeply nested JSON arguments', () => {
     const r = new Redactions();
     const pw = 'dbPa$$' + 'word9876';
@@ -450,7 +452,7 @@ describe('generic secret shapes: nested JSON via value()', () => {
         query: 'SELECT 1',
       },
     };
-    const out = r.value(input) as typeof input;
+    const out = JSON.parse(r.secrets(JSON.stringify(r.value(input)))) as typeof input;
     expect(out.args.connection.url).toBe('postgres://reader:[REDACTED]@db.prod.example.com/main');
     expect(out.args.connection.timeout).toBe(30);
     expect(out.args.query).toBe('SELECT 1');
@@ -459,9 +461,22 @@ describe('generic secret shapes: nested JSON via value()', () => {
   it('redacts an API key in a flat JSON object', () => {
     const r = new Redactions();
     const key = 'sk-' + 'TestFakeKeyAbcdefghijklmno123456';
-    const out = r.value({ model: 'gpt-4', api_key: key }) as Record<string, string>;
+    const out = JSON.parse(r.secrets(JSON.stringify({ model: 'gpt-4', api_key: key }))) as Record<
+      string,
+      string
+    >;
     expect(out.api_key).toBe('[REDACTED]');
     expect(out.model).toBe('gpt-4');
+  });
+});
+
+describe('generic secret shapes: scoped to secrets()', () => {
+  it('leaves text() as it was: only secrets() applies the generic shapes', () => {
+    const r = new Redactions();
+    const input = 'DB_PASSWORD=' + 'hunter2' + 'secret';
+    expect(r.text(input)).toBe(input);
+    expect(r.value({ env: input })).toEqual({ env: input });
+    expect(r.secrets(input)).toBe('DB_PASSWORD=[REDACTED]');
   });
 });
 
@@ -474,7 +489,7 @@ describe('generic secret shapes: secret straddling a truncation boundary', () =>
     const capped = `password=${fullPw}`.slice(0, 20);
     // Redact is applied before the cap in Phase B, but this test proves the
     // pattern still masks even a partial value at the end of the string.
-    const out = r.text(capped);
+    const out = r.secrets(capped);
     expect(out).not.toContain(fullPw.slice(0, 10));
   });
 });
@@ -487,37 +502,37 @@ describe('generic secret shapes: names, blocks and inputs the first patterns mis
 
   it('masks the value of a longer name that contains a secret keyword', () => {
     const r = new Redactions();
-    expect(r.text(`DB_PASSWORD=${value}`)).toBe('DB_PASSWORD=[REDACTED]');
-    expect(r.text(`client_secret=${value}`)).toBe('client_secret=[REDACTED]');
-    expect(r.text(`AWS_SECRET_ACCESS_KEY=${value}`)).toBe('AWS_SECRET_ACCESS_KEY=[REDACTED]');
-    expect(r.text(`{"db_password": "${value}"}`)).toBe('{"db_password": "[REDACTED]"}');
+    expect(r.secrets(`DB_PASSWORD=${value}`)).toBe('DB_PASSWORD=[REDACTED]');
+    expect(r.secrets(`client_secret=${value}`)).toBe('client_secret=[REDACTED]');
+    expect(r.secrets(`AWS_SECRET_ACCESS_KEY=${value}`)).toBe('AWS_SECRET_ACCESS_KEY=[REDACTED]');
+    expect(r.secrets(`{"db_password": "${value}"}`)).toBe('{"db_password": "[REDACTED]"}');
   });
 
   it('keeps the name when the value is the same word', () => {
     const r = new Redactions();
-    expect(r.text('password=' + 'password')).toBe('password=[REDACTED]');
+    expect(r.secrets('password=' + 'password')).toBe('password=[REDACTED]');
   });
 
   it('leaves names where the keyword runs on into a longer word', () => {
     const r = new Redactions();
     const text = 'max_tokens=1000 tokenizer=abcd secretary=bob password policy';
-    expect(r.text(text)).toBe(text);
+    expect(r.secrets(text)).toBe(text);
   });
 
   it('masks a private-key block that names no key type', () => {
     const r = new Redactions();
-    expect(r.text(`${begin('')}\nMIIEvQIBADANBg\n${end('')} after`)).toBe('[REDACTED] after');
+    expect(r.secrets(`${begin('')}\nMIIEvQIBADANBg\n${end('')} after`)).toBe('[REDACTED] after');
   });
 
   it('masks a private-key block through the end of the text when its END line was cut off', () => {
     const r = new Redactions();
-    expect(r.text(`key: ${begin('RSA ')}\nMIIEow\nAAAA`)).toBe('key: [REDACTED]');
+    expect(r.secrets(`key: ${begin('RSA ')}\nMIIEow\nAAAA`)).toBe('key: [REDACTED]');
   });
 
   it('leaves a public-key block without an END line alone', () => {
     const r = new Redactions();
     const text = '-----BEGIN PUBLIC KEY-----\nMIIB';
-    expect(r.text(text)).toBe(text);
+    expect(r.secrets(text)).toBe(text);
   });
 
   it('redacts long inputs in linear time', () => {
@@ -529,7 +544,7 @@ describe('generic secret shapes: names, blocks and inputs the first patterns mis
       'token_'.repeat(10_000),
     ]) {
       const started = performance.now();
-      r.text(text);
+      r.secrets(text);
       expect(performance.now() - started).toBeLessThan(100);
     }
   });

@@ -394,6 +394,24 @@ describe('tool detail', () => {
     for (const text of published) expect(text).not.toContain(TOKEN.slice(0, 8));
   });
 
+  it('masks a secret in the title of a tool call only when on', () => {
+    const value = 'abcdef' + 'ghijklmn';
+    const title = `curl -H "Authorization: Bearer ${value}" https://api.example.com`;
+    const event = {
+      ...base,
+      type: 'item.completed' as const,
+      item: { id: 'tool', type: 'command_execution' as const, status: 'completed' as const, title },
+    };
+    const titles = (bodies: ReturnType<ChatProjector['ingest']>) =>
+      bodies.flatMap((body) => (body.type === 'item.upsert' ? [body.item.title] : []));
+    const off = new ChatProjector(session('codex'), new Redactions(), null);
+    off.bindTurn('turn', context);
+    expect(titles(off.ingest(event, 0))).toEqual([title]);
+    expect(titles(setup()(event, 0))).toEqual([
+      'curl -H "Authorization: Bearer [REDACTED]" https://api.example.com',
+    ]);
+  });
+
   it('publishes nothing without redactions to apply', () => {
     const feed = setup(null);
     expect(texts(feed(tool('completed', 'out'), 0))).toEqual(['']);

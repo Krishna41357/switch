@@ -94,13 +94,18 @@ export class ChatProjector {
               ? 'user-message'
               : 'tool-activity';
         // Raw tool output and vendor payloads are not a shared tool summary.
+        const title = event.item.title.slice(0, 4096);
         const item: Item = {
           itemId: key,
           turnId: event.turnId,
           revision: previous?.item.revision ?? 0,
           kind,
           status: event.item.status === 'in_progress' ? 'in-progress' : event.item.status,
-          title: event.item.title.slice(0, 4096),
+          // With tool detail on, the command in a title is masked as its detail is.
+          title:
+            kind === 'tool-activity' && this.toolDetails && this.redactions
+              ? this.redactions.secrets(title)
+              : title,
           text: kind === 'tool-activity' ? '' : (event.item.text ?? previous?.item.text ?? ''),
           attachments: [],
           origin: kind === 'user-message' ? context.origin : null,
@@ -177,11 +182,13 @@ export class ChatProjector {
     let text: string;
     try {
       const sections: string[] = [];
+      const redactions = this.redactions;
       if (detail.input !== null)
         sections.push(
-          `Input: ${this.redactions.text(JSON.stringify(this.redactions.value(detail.input)))}`
+          `Input: ${redactions.secrets(redactions.text(JSON.stringify(redactions.value(detail.input))))}`
         );
-      if (detail.output !== null) sections.push(`Output:\n${this.redactions.text(detail.output)}`);
+      if (detail.output !== null)
+        sections.push(`Output:\n${redactions.secrets(redactions.text(detail.output))}`);
       text = sections.join('\n\n');
     } catch {
       return TOOL_DETAIL_WITHHELD;

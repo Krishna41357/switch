@@ -85,7 +85,7 @@ const TOKEN_SHAPES = [
 ];
 
 /**
- * Generic secret shapes — a separate list so GitHub shapes stay intact.
+ * Generic secret shapes, applied to tool detail only (`Redactions.secrets()`).
  *
  * Supported patterns (documented, not exhaustive):
  *  • Authorization/Bearer header values:
@@ -112,10 +112,10 @@ const TOKEN_SHAPES = [
  * across stream chunks is always reassembled before redactGenericShapes runs.
  * The existing unfinished() / cutTail() pair handles exact-value splits in
  * live streaming; generic shapes do not need the same mechanism here.
- */
-/**
- * Patterns where the ENTIRE match is the secret and should be replaced whole.
- * Prefix shapes (sk-, AKIA, etc.) and JWT / PEM blocks land here.
+ *
+ * The list below holds the patterns where the ENTIRE match is the secret and
+ * is replaced whole: the vendor prefixes (sk-, AKIA, etc.), JWTs and PEM blocks.
+ * A separate list from GitHub's shapes, so those stay intact.
  */
 const FULL_MATCH_SHAPES: readonly RegExp[] = [
   // Common vendor API key prefixes (at a word boundary)
@@ -206,8 +206,13 @@ export class Redactions {
   }
 
   text(input: string): string {
-    if (!this.values.size) return redactGenericShapes(redactShapes(input));
-    return redactGenericShapes(redactShapes(this.cutTail(redactText(input, this.list()))));
+    if (!this.values.size) return redactShapes(input);
+    return redactShapes(this.cutTail(redactText(input, this.list())));
+  }
+
+  /** Generic secret shapes only, for tool detail. text() is unchanged. */
+  secrets(input: string): string {
+    return redactGenericShapes(input);
   }
 
   /**
