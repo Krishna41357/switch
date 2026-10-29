@@ -84,6 +84,101 @@ const TOKEN_SHAPES = [
   /eC1hY2Nlc3MtdG9rZW46[A-Za-z0-9+/]*={0,2}/g,
 ];
 
+/**
+ * Generic secret shapes — a separate list so GitHub shapes stay intact.
+ *
+ * Supported patterns (documented, not exhaustive):
+ *  • Authorization/Bearer header values:
+ *      Authorization: Bearer <value>  |  Authorization: Token <value>
+ *  • Common API key vendor prefixes (at a word boundary):
+ *      sk-…  (OpenAI and compatible)
+ *      AKIA… (AWS access key id)
+ *      xoxa-/xoxb-/xoxp-/xoxr-/xoxs- (Slack)
+ *      AIza… (Google API key)
+ *  • JSON Web Tokens: three base64url segments separated by dots
+ *  • PEM private-key blocks:
+ *      -----BEGIN … PRIVATE KEY----- … -----END … PRIVATE KEY-----
+ *      or through the end of the text when the END line was cut off
+ *  • URL credentials: scheme://user:password@host — password masked, user kept
+ *  • Key=value secret assignments (JSON, env-var, CLI flag forms):
+ *      password=, passwd=, secret=, token=, api_key=, api-key=, also inside a
+ *      longer name (DB_PASSWORD=, client_secret=, AWS_SECRET_ACCESS_KEY=),
+ *      followed by a non-whitespace value. A keyword followed by a letter
+ *      (max_tokens=, tokenizer=) is not a secret name; a few harmless names
+ *      such as token_count= are masked anyway.
+ *
+ * Split-across-chunks safety: these patterns are applied to completed text.
+ * Tool detail is only published after an item completes, so a secret split
+ * across stream chunks is always reassembled before redactGenericShapes runs.
+ * The existing unfinished() / cutTail() pair handles exact-value splits in
+ * live streaming; generic shapes do not need the same mechanism here.
+ */
+/**
+ * Patterns where the ENTIRE match is the secret and should be replaced whole.
+ * Prefix shapes (sk-, AKIA, etc.) and JWT / PEM blocks land here.
+ */
+const FULL_MATCH_SHAPES: readonly RegExp[] = [
+  // Common vendor API key prefixes (at a word boundary)
+  /\bsk-[A-Za-z0-9_-]{16,}/g,
+  /\bAKIA[A-Z0-9]{12,}/g,
+  /\bxox[abprs]-[A-Za-z0-9-]{8,}/g,
+  /\bAIza[A-Za-z0-9_-]{30,}/g,
+
+  // JSON Web Tokens: header.payload.signature (base64url, each segment >= 4 chars)
+  /\beyJ[A-Za-z0-9_-]{2,}\.eyJ[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_.-]{8,}/g,
+
+  // PEM private-key block (single- or multi-line; lazy inner match), through
+  // the end of the text when the END line was cut off
+  /-----BEGIN(?: [A-Z]+)* PRIVATE KEY-----[\s\S]*?(?:-----END(?: [A-Z]+)* PRIVATE KEY-----|$)/g,
+];
+
+/**
+ * A secret's name, at the start of a word: one of the keywords, inside a
+ * longer name or not, but not followed by a letter, so `max_tokens` and
+ * `tokenizer` are not one. Nothing word-like before it, so a long run of word
+ * characters is tried from its start only, and a bounded name around the
+ * keyword, so that one try is not a scan of the whole run per keyword in it.
+ */
+const SECRET_NAME =
+  '(?<![\\w-])[\\w-]{0,64}?(?:password|passwd|secret|token|api[_-]?key)(?![A-Za-z])[\\w-]{0,64}';
+
+/**
+ * Patterns that keep what names the secret and mask only the secret: each is
+ * a regex and its replacement, which puts back the kept capture group(s).
+ */
+const PREFIX_SECRET_SHAPES: readonly [RegExp, string][] = [
+  // Authorization header: keep "Authorization: Bearer " prefix, mask value.
+  [
+    /(\b[Aa]uthorization\s*[:=]\s*(?:Bearer|Token|Basic|Digest)\s+)[A-Za-z0-9+/_.~=%-]{8,}/g,
+    '$1[REDACTED]',
+  ],
+
+  // Bare Bearer keyword in a log line: keep "Bearer ", mask value.
+  [/(\bBearer\s+)[A-Za-z0-9+/_.~=%-]{8,}/g, '$1[REDACTED]'],
+
+  // URL credentials: keep scheme://user, mask password, keep @. The scheme and
+  // password are bounded so a long run is not rescanned from every position.
+  [/(\b[A-Za-z][A-Za-z0-9+.-]{0,31}:\/\/[^/:@\s]+):[^@\s]{3,256}@/g, '$1:[REDACTED]@'],
+
+  // Key=value JSON string form: "password":"value"  — keep the key+delimiter, mask value.
+  [new RegExp(`(${SECRET_NAME}\\s*["']?\\s*:\\s*["'])[^"',;\\s]{4,}`, 'gi'), '$1[REDACTED]'],
+
+  // Key=value env-var / CLI flag form: password=value  --token=value  DB_PASSWORD=value
+  [new RegExp(`(${SECRET_NAME}\\s*=\\s*)[^\\s,;&|'"]{4,}`, 'gi'), '$1[REDACTED]'],
+];
+
+/** Redact all generic secret shapes from `text`: whole matches, then the secret part of prefixed ones. */
+function redactGenericShapes(text: string): string {
+  const masked = FULL_MATCH_SHAPES.reduce(
+    (output, shape) => output.replace(shape, '[REDACTED]'),
+    text
+  );
+  return PREFIX_SECRET_SHAPES.reduce(
+    (output, [shape, replacement]) => output.replace(shape, replacement),
+    masked
+  );
+}
+
 const CUT_TAIL_MIN = 8;
 
 function redactShapes(text: string): string {
@@ -111,8 +206,20 @@ export class Redactions {
   }
 
   text(input: string): string {
-    if (!this.values.size) return redactShapes(input);
-    return redactShapes(this.cutTail(redactText(input, this.list())));
+    if (!this.values.size) return redactGenericShapes(redactShapes(input));
+    return redactGenericShapes(redactShapes(this.cutTail(redactText(input, this.list()))));
+  }
+
+  /**
+   * Redact `input` and return it, or return `fallback` if redaction throws.
+   * Fail-closed: callers that must not leak a secret on error use this.
+   */
+  safeText(input: string, fallback: string): string {
+    try {
+      return this.text(input);
+    } catch {
+      return fallback;
+    }
   }
 
   /**
