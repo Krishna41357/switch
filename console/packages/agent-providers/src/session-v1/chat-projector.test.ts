@@ -427,4 +427,47 @@ describe('tool detail', () => {
     const feed = setup(new Failing());
     expect(texts(feed(tool('completed', 'out'), 0))).toEqual([TOOL_DETAIL_WITHHELD]);
   });
+
+  /** Every text published while `deltas` stream in 300 ms apart, then on completion. */
+  function stream(deltas: string[]): string[] {
+    const feed = setup();
+    const published = texts(feed(tool('in_progress', ''), 0));
+    deltas.forEach((delta, index) =>
+      published.push(
+        ...texts(feed({ ...base, type: 'item.delta', itemId: 'tool', delta }, (index + 1) * 300))
+      )
+    );
+    published.push(...texts(feed(tool('completed', ''), 10_000)));
+    return published;
+  }
+
+  it('publishes streamed output by whole lines, so no secret shows in part', () => {
+    const url = 'postgres://app:' + PASSWORD + '@db/main';
+    const assignment = 'DB_PASSWORD=' + PASSWORD;
+    const published = stream([
+      'url: ' + url.slice(0, url.indexOf(':', 12) + 6),
+      url.slice(url.indexOf(':', 12) + 6) + '\n',
+      assignment.slice(0, 'DB_PASSWORD='.length + 4),
+      assignment.slice('DB_PASSWORD='.length + 4) + '\n',
+    ]);
+    expect(published.length).toBeGreaterThan(2);
+    for (const text of published) expect(text).not.toContain(PASSWORD.slice(0, 3));
+    expect(published.at(-1)).toBe(
+      'Input: {"command":"ls"}\n\nOutput:\n' +
+        'url: postgres://app:[REDACTED]@db/main\nDB_PASSWORD=[REDACTED]\n'
+    );
+  });
+
+  it('never shows the body of a private key streamed in pieces', () => {
+    const body = 'MIIEow' + 'IBAAKCAQEA0Z3VS5JJ';
+    const published = stream([
+      '-----BEGIN RSA ',
+      'PRIVATE KEY-----\n' + body.slice(0, 8),
+      body.slice(8) + '\n',
+      '-----END RSA ' + 'PRIVATE KEY-----\ndone\n',
+    ]);
+    expect(published.length).toBeGreaterThan(2);
+    for (const text of published) expect(text).not.toContain(body.slice(0, 4));
+    expect(published.at(-1)).toBe('Input: {"command":"ls"}\n\nOutput:\n[REDACTED]\ndone\n');
+  });
 });

@@ -107,11 +107,11 @@ const TOKEN_SHAPES = [
  *      (max_tokens=, tokenizer=) is not a secret name; a few harmless names
  *      such as token_count= are masked anyway.
  *
- * Split-across-chunks safety: these patterns are applied to completed text.
- * Tool detail is only published after an item completes, so a secret split
- * across stream chunks is always reassembled before redactGenericShapes runs.
- * The existing unfinished() / cutTail() pair handles exact-value splits in
- * live streaming; generic shapes do not need the same mechanism here.
+ * Split-across-chunks safety: these patterns only match a secret seen whole.
+ * While a tool call's output is streaming, only its complete lines are
+ * published, and the rest once the call completes, so a secret still arriving
+ * on its line is never redacted in part and shown. The existing unfinished() /
+ * cutTail() pair handles exact-value splits in live streaming.
  *
  * The list below holds the patterns where the ENTIRE match is the secret and
  * is replaced whole: the vendor prefixes (sk-, AKIA, etc.), JWTs and PEM blocks.

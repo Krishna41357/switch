@@ -154,7 +154,7 @@ export class ChatProjector {
     buffer.emittedAt = now;
     buffer.dirty = false;
     if (this.toolDetails && buffer.item.kind === 'tool-activity')
-      buffer.item.text = this.toolText(this.toolDetails, buffer);
+      buffer.item.text = this.toolText(this.toolDetails, buffer, final);
     const characters = Array.from(this.visible(buffer.item.text, final));
     const count = Math.max(1, Math.ceil(characters.length / 4096), buffer.parts);
     buffer.parts = count;
@@ -173,10 +173,12 @@ export class ChatProjector {
    * Redacted whole before it is cut, so a secret the cut goes through is
    * already masked: each input string first, so one clipped short is caught
    * by its cut tail, then the input's JSON, so a value is caught by its key.
+   * Until `final`, output only up to its last line break: a secret the shapes
+   * would match whole is not shown in part while its line is still arriving.
    * Nothing without redactions, and a notice in place of the detail when
    * redaction fails.
    */
-  private toolText(toolDetails: ToolDetailBuffer, buffer: BufferedItem): string {
+  private toolText(toolDetails: ToolDetailBuffer, buffer: BufferedItem, final: boolean): string {
     const detail = toolDetails.detail(this.session.epoch, buffer.item.turnId, buffer.nativeId);
     if (!detail || !this.redactions) return '';
     let text: string;
@@ -187,8 +189,11 @@ export class ChatProjector {
         sections.push(
           `Input: ${redactions.secrets(redactions.text(JSON.stringify(redactions.value(detail.input))))}`
         );
-      if (detail.output !== null)
-        sections.push(`Output:\n${redactions.secrets(redactions.text(detail.output))}`);
+      const output =
+        detail.output !== null && !final
+          ? detail.output.slice(0, detail.output.lastIndexOf('\n') + 1)
+          : detail.output;
+      if (output) sections.push(`Output:\n${redactions.secrets(redactions.text(output))}`);
       text = sections.join('\n\n');
     } catch {
       return TOOL_DETAIL_WITHHELD;
